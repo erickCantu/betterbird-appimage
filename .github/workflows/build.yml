@@ -1,106 +1,168 @@
 name: Build Betterbird AppImage
 
 on:
-    schedule:
-        - cron: "0 21 * * 6"
-    workflow_dispatch:
-        inputs:
-            force_rebuild:
-                description: "Force rebuild even if upstream is unchanged"
-                required: false
-                type: boolean
-                default: false
+  schedule:
+    - cron: "0 21 * * 6"
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: "Force rebuild even if upstream is unchanged"
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
-    group: build-${{ github.ref }}
-    cancel-in-progress: true
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-    build-and-release:
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      did_build: ${{ steps.gate.outputs.did_build }}
+      clean: ${{ steps.url.outputs.clean }}
+      expected_sha256: ${{ steps.sum.outputs.expected }}
 
-        steps:
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-              with:
-                persist-credentials: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: false
 
-            - name: Install build tools
-              run: sudo apt-get update && sudo apt-get install -y imagemagick desktop-file-utils
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y imagemagick desktop-file-utils
 
-            - name: Resolve current upstream download URL
-              id: url
-              run: |
-                URL="$(curl -fsSL 'https://www.betterbird.eu/downloads/getloc.php?os=linux&lang=en-US&version=release')"
-                FILENAME="$(basename "$URL")"
-                SERIES="${FILENAME#betterbird-}"
-                MAJOR="${SERIES%%.*}"
-                CLEAN="${SERIES%%.en-US.*}"
-                CLEAN="${CLEAN//esr/}"
-                echo "url=$URL"               >> "$GITHUB_OUTPUT"
-                echo "filename=$FILENAME"     >> "$GITHUB_OUTPUT"
-                echo "series=$SERIES"         >> "$GITHUB_OUTPUT"
-                echo "major=$MAJOR"           >> "$GITHUB_OUTPUT"
-                echo "clean=$CLEAN"           >> "$GITHUB_OUTPUT"
+      - name: Resolve current upstream download URL
+        id: url
+        run: |
+          set -euo pipefail
+          URL="$(curl -fsSL 'https://www.betterbird.eu/downloads/getloc.php?os=linux&lang=en-US&version=release')"
+          case "$URL" in
+            https://www.betterbird.eu/downloads/LinuxArchive/betterbird-*.tar.xz) ;;
+            *) echo "::error::Unexpected upstream URL"; exit 1 ;;
+          esac
 
-            - name: Fetch upstream checksum file
-              id: sum
-              run: |
-                curl -fsSL "https://www.betterbird.eu/downloads/sha256-${{ steps.url.outputs.major }}.txt" -o sha256-upstream.txt
-                EXPECTED="$(grep -F " *${{ steps.url.outputs.filename }}" sha256-upstream.txt | awk '{print$1}')"
-                [ -n "$EXPECTED" ] || { echo "::error::No checksum published for ${{ steps.url.outputs.filename }}"; exit 1; }
-                echo "expected=$EXPECTED" >> "$GITHUB_OUTPUT"
+          FILENAME="${URL##*/}"
+          case "$FILENAME" in
+            betterbird-[0-9]*.en-US.linux-x86_64.tar.xz) ;;
+            *) echo "::error::Unexpected upstream filename"; exit 1 ;;
+          esac
 
-            - name: Check whether a rebuild is needed
-              id: gate
-              env:
-                FORCE_REBUILD: ${{ inputs.force_rebuild }}
-                EXPECTED_SHA256: ${{ steps.sum.outputs.expected }}
-              run: |
-                if [ "$FORCE_REBUILD" = "true" ] || [ ! -f state/last-sha256.txt ] || [ "$(cat state/last-sha256.txt)" != "$EXPECTED_SHA256" ]; then
-                  echo "did_build=true" >> "$GITHUB_OUTPUT"
-                else
-                  echo "did_build=false" >> "$GITHUB_OUTPUT"
-                fi
+          SERIES="${FILENAME#betterbird-}"
+          MAJOR="${SERIES%%.*}"
+          CLEAN="${SERIES%%.en-US.*}"
+          CLEAN="${CLEAN//esr/}"
+          case "$CLEAN" in
+            [0-9]*.[0-9]*.[0-9]*-bb[0-9]*) ;;
+            *) echo "::error::Unexpected release version"; exit 1 ;;
+          esac
 
-            - name: Download + integrity verify
-              if: steps.gate.outputs.did_build == 'true'
-              run: |
-                curl -fL -O "${{ steps.url.outputs.url }}"
-                echo "${{ steps.sum.outputs.expected }} *${{ steps.url.outputs.filename }}" | sha256sum -c -
+          {
+            echo "url=$URL"
+            echo "filename=$FILENAME"
+            echo "major=$MAJOR"
+            echo "clean=$CLEAN"
+          } >> "$GITHUB_OUTPUT"
 
-            - name: Build AppImage
-              if: steps.gate.outputs.did_build == 'true'
-              run: |
-                bash betterbird-builder.sh
-                desktop-file-validate betterbird.AppDir/betterbird.desktop
-                [ "$(identify -format '%wx%h' betterbird.AppDir/.DirIcon)" = "256x256" ] || { echo "::error::.DirIcon is not 256x256"; exit 1; }
-                ls -lh dist/
+      - name: Fetch upstream checksum file
+        id: sum
+        env:
+          MAJOR: ${{ steps.url.outputs.major }}
+          FILENAME: ${{ steps.url.outputs.filename }}
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://www.betterbird.eu/downloads/sha256-${MAJOR}.txt" -o sha256-upstream.txt
+          EXPECTED="$(grep -F " *${FILENAME}" sha256-upstream.txt | awk '{print $1}')"
+          if ! printf '%s' "$EXPECTED" | grep -Eq '^[[:xdigit:]]{64}$'; then
+            echo "::error::No valid checksum published for $FILENAME"
+            exit 1
+          fi
+          echo "expected=$EXPECTED" >> "$GITHUB_OUTPUT"
 
-            - name: Verify build artifacts
-              if: steps.gate.outputs.did_build == 'true'
-              run: |
-                test -f "dist/Betterbird-${{ steps.url.outputs.clean }}-x86_64.AppImage"
-                test -f "dist/Betterbird-${{ steps.url.outputs.clean }}-x86_64.AppImage.zsync"
+      - name: Check whether a rebuild is needed
+        id: gate
+        env:
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+          EXPECTED_SHA256: ${{ steps.sum.outputs.expected }}
+        run: |
+          if [ "$FORCE_REBUILD" = "true" ] || [ ! -f state/last-sha256.txt ] || [ "$(cat state/last-sha256.txt)" != "$EXPECTED_SHA256" ]; then
+            echo "did_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "did_build=false" >> "$GITHUB_OUTPUT"
+          fi
 
-            - name: Publish versioned release (D1, D2)
-              if: steps.gate.outputs.did_build == 'true'
-              uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
-              with:
-                tag_name: ${{ steps.url.outputs.clean }}
-                name: "Betterbird ${{ steps.url.outputs.clean }}"
-                files: |
-                    dist/*.AppImage
-                    dist/*.zsync
+      - name: Download and verify upstream archive
+        if: steps.gate.outputs.did_build == 'true'
+        env:
+          URL: ${{ steps.url.outputs.url }}
+          FILENAME: ${{ steps.url.outputs.filename }}
+          EXPECTED_SHA256: ${{ steps.sum.outputs.expected }}
+        run: |
+          set -euo pipefail
+          curl -fL "$URL" -o "$FILENAME"
+          printf '%s  %s\n' "$EXPECTED_SHA256" "$FILENAME" | sha256sum -c -
 
-            - name: Commit new state (D1b memory)
-              if: steps.gate.outputs.did_build == 'true'
-              run: |
-                mkdir -p state
-                echo "${{ steps.sum.outputs.expected }}" > state/last-sha256.txt
-                git config user.name "github-actions[bot]"
-                git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                git add state/last-sha256.txt
-                git diff --cached --quiet || git commit -m "state: upstream sha256 ${{ steps.sum.outputs.expected }}"
-                git push
+      - name: Build AppImage
+        if: steps.gate.outputs.did_build == 'true'
+        run: |
+          bash betterbird-builder.sh
+          desktop-file-validate betterbird.AppDir/betterbird.desktop
+          test "$(identify -format '%wx%h' betterbird.AppDir/.DirIcon)" = "256x256"
+
+      - name: Verify build artifacts
+        if: steps.gate.outputs.did_build == 'true'
+        env:
+          CLEAN: ${{ steps.url.outputs.clean }}
+        run: |
+          test -f "dist/Betterbird-${CLEAN}-x86_64.AppImage"
+          test -f "dist/Betterbird-${CLEAN}-x86_64.AppImage.zsync"
+
+      - name: Upload build artifacts
+        if: steps.gate.outputs.did_build == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: betterbird-${{ steps.url.outputs.clean }}
+          path: |
+            dist/*.AppImage
+            dist/*.zsync
+
+  publish:
+    needs: build
+    if: needs.build.outputs.did_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
+        with:
+          persist-credentials: true
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: betterbird-${{ needs.build.outputs.clean }}
+          path: dist
+
+      - name: Publish versioned release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+        with:
+          tag_name: ${{ needs.build.outputs.clean }}
+          name: "Betterbird ${{ needs.build.outputs.clean }}"
+          files: |
+            dist/*.AppImage
+            dist/*.zsync
+
+      - name: Commit new state
+        env:
+          EXPECTED_SHA256: ${{ needs.build.outputs.expected_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p state
+          printf '%s\n' "$EXPECTED_SHA256" > state/last-sha256.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/last-sha256.txt
+          git diff --cached --quiet || git commit -m "state: upstream sha256 $EXPECTED_SHA256"
+          git push

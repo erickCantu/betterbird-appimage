@@ -15,24 +15,15 @@ CLEAN="${CLEAN#betterbird-}"
 CLEAN="${CLEAN%%.en-US.*}"
 CLEAN="${CLEAN//esr/}"
 
-# -- 2. Download and verify the official appimagetool
-TOOL_META="$(curl -fsSL 'https://api.github.com/repos/AppImage/appimagetool/releases/tags/continuous')"
-TOOL_INFO="$(printf '%s' "$TOOL_META" | python3 -c '
-import json
-import sys
-
-assets = json.load(sys.stdin)["assets"]
-asset = next(asset for asset in assets if asset["name"] == "appimagetool-x86_64.AppImage")
-digest = asset.get("digest", "")
-if not digest.startswith("sha256:"):
-    raise SystemExit("appimagetool release has no SHA-256 digest")
-print(asset["browser_download_url"])
-print(digest.split(":", 1)[1])
-')"
-TOOL_URL="$(printf '%s\n' "$TOOL_INFO" | sed -n '1p')"
-TOOL_SHA="$(printf '%s\n' "$TOOL_INFO" | sed -n '2p')"
+# -- 2. Download and verify a pinned appimagetool release
+TOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"
+TOOL_SHA="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+[[ "$TOOL_URL" =~ ^https://github\.com/AppImage/appimagetool/releases/download/1\.[0-9]+\.[0-9]+/appimagetool-x86_64\.AppImage$ ]] ||
+  { echo "Invalid appimagetool URL" >&2; exit 1; }
+[[ "$TOOL_SHA" =~ ^[[:xdigit:]]{64}$ ]] ||
+  { echo "Invalid appimagetool SHA-256" >&2; exit 1; }
 curl -fsSL "$TOOL_URL" -o appimagetool-x86_64.AppImage
-echo "${TOOL_SHA} *appimagetool-x86_64.AppImage" | sha256sum -c -
+printf '%s  %s\n' "$TOOL_SHA" appimagetool-x86_64.AppImage | sha256sum -c -
 chmod +x appimagetool-x86_64.AppImage
 
 # -- 3. Assemble the AppDir

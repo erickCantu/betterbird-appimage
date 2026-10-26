@@ -39,7 +39,7 @@ for png in "$ICON_SRC"/default*.png; do
 done
 convert "$ICON_SRC/default128.png" -resize 256x256 \
         "$APP.AppDir/usr/share/icons/hicolor/256x256/apps/betterbird.png"
-cat > "$APP.AppDir/AppRun" << 'EOF'
+cat > "$APP.AppDir/betterbird.desktop" << 'EOF'
 [Desktop Entry]
 Version=1.0
 Encoding=UTF-8

@@ -77,6 +77,12 @@ jobs:
                 [ "$(identify -format '%wx%h' betterbird.AppDir/.DirIcon)" = "256x256" ] || { echo "::error::.DirIcon is not 256x256"; exit 1; }
                 ls -lh dist/
 
+            - name: Verify build artifacts
+              if: steps.gate.outputs.did_build == 'true'
+              run: |
+                  test -f "dist/Betterbird-${{ env.CLEAN_VERSION }}-x86_64.AppImage"
+                  test -f "dist/Betterbird-${{ env.CLEAN_VERSION }}-x86_64.AppImage.zsync"
+
             - name: Publish versioned release (D1, D2)
               if: steps.gate.outputs.did_build == 'true'
               uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64

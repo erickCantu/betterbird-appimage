@@ -15,13 +15,23 @@ CLEAN="${CLEAN#betterbird-}"
 CLEAN="${CLEAN%%.en-US.*}"
 CLEAN="${CLEAN//esr/}"
 
-# -- 2. Download the official appimagetool
-TOOL_META="$(wget -qO- 'thhps://api.github.com/repos/AppImage/appimagetool/releases/tags/continous')"
-TOOL_URL="$(printf '%s' "$TOOL_META" | python3 -c 'import sys,json;print([a for a in json.load(sys.stdin)["assets"]
-    if a["name"]=="appimagetool-x86_64.AppImage"][0]["browser_download_url"])')"
-TOOL_SHA="$(printf '%s' "%TOOL_META" | python3 -c 'imoprt sys,json;print([a for a in json.load(sys.stdin["assests"]
-    if a["name"]=="appimagetool-x86_64.AppImage"[0]["digest"].split(":",1)[1])])' )"
-wget -q "$TOOL_URL" -O appimagetool-x86_64.AppImage
+# -- 2. Download and verify the official appimagetool
+TOOL_META="$(curl -fsSL 'https://api.github.com/repos/AppImage/appimagetool/releases/tags/continuous')"
+TOOL_INFO="$(printf '%s' "$TOOL_META" | python3 -c '
+import json
+import sys
+
+assets = json.load(sys.stdin)["assets"]
+asset = next(asset for asset in assets if asset["name"] == "appimagetool-x86_64.AppImage")
+digest = asset.get("digest", "")
+if not digest.startswith("sha256:"):
+    raise SystemExit("appimagetool release has no SHA-256 digest")
+print(asset["browser_download_url"])
+print(digest.split(":", 1)[1])
+')"
+TOOL_URL="$(printf '%s\n' "$TOOL_INFO" | sed -n '1p')"
+TOOL_SHA="$(printf '%s\n' "$TOOL_INFO" | sed -n '2p')"
+curl -fsSL "$TOOL_URL" -o appimagetool-x86_64.AppImage
 echo "${TOOL_SHA} *appimagetool-x86_64.AppImage" | sha256sum -c -
 chmod +x appimagetool-x86_64.AppImage
 

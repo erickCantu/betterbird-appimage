@@ -19,11 +19,12 @@ jobs:
     build-and-release:
         runs-on: ubuntu-latest
         permissions:
-            contents:
-                write
+            contents: write
 
         steps:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+              with:
+                persist-credentials: false
 
             - name: Install build tools
               run: sudo apt-get update && sudo apt-get install -y imagemagick desktop-file-utils
@@ -41,7 +42,7 @@ jobs:
                 echo "filename=$FILENAME"     >> "$GITHUB_OUTPUT"
                 echo "series=$SERIES"         >> "$GITHUB_OUTPUT"
                 echo "major=$MAJOR"           >> "$GITHUB_OUTPUT"
-                echo "CLEAN_VERSION=$CLEAN"   >> "$GITHUB_ENV"
+                echo "clean=$CLEAN"           >> "$GITHUB_OUTPUT"
 
             - name: Fetch upstream checksum file
               id: sum
@@ -80,15 +81,15 @@ jobs:
             - name: Verify build artifacts
               if: steps.gate.outputs.did_build == 'true'
               run: |
-                  test -f "dist/Betterbird-${{ env.CLEAN_VERSION }}-x86_64.AppImage"
-                  test -f "dist/Betterbird-${{ env.CLEAN_VERSION }}-x86_64.AppImage.zsync"
+                test -f "dist/Betterbird-${{ steps.url.outputs.clean }}-x86_64.AppImage"
+                test -f "dist/Betterbird-${{ steps.url.outputs.clean }}-x86_64.AppImage.zsync"
 
             - name: Publish versioned release (D1, D2)
               if: steps.gate.outputs.did_build == 'true'
               uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
               with:
-                tag_name: ${{ env.CLEAN_VERSION }}
-                name: "Betterbird ${{ env.CLEAN_VERSION }}"
+                tag_name: ${{ steps.url.outputs.clean }}
+                name: "Betterbird ${{ steps.url.outputs.clean }}"
                 files: |
                     dist/*.AppImage
                     dist/*.zsync

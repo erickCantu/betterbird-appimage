@@ -1,0 +1,99 @@
+name: Build Betterbird AppImage
+
+on:
+    schedule:
+        - cron: "0 21 * * 6"
+    workflow_dispatch:
+        inputs:
+            force_rebuild:
+                description: "Force rebuild even if upstream is unchanged"
+                required: false
+                type: boolean
+                default: false
+
+concurrency:
+    group: build-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    build-and-release:
+        runs-on: ubuntu-latest
+        permissions:
+            contents:
+                write
+
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+            - name: Install build tools
+              run: sudo apt-get update && sudo apt-get install -y imagemagick desktop-file-utils
+
+            - name: Resolve current upstream download URL
+              id: url
+              run: |
+                URL="$(wget -qO- 'https://www.betterbird.eu/downloads/getloc.php?os=linux&lang=en-US&version=release')"
+                FILENAME="$(basename "$URL")"
+                SERIES="${FILENAME#betterbird-}"
+                MAJOR="${SERIES%%.*}"
+                CLEAN="${SERIES%%.en-US.*}"
+                CLEAN="${CLEAN//esr/}"
+                echo "url=$URL"               >> "$GITHUB_OUTPUT"
+                echo "filename=$FILENAME"     >> "$GITHUB_OUTPUT"
+                echo "series=$SERIES"         >> "$GITHUB_OUTPUT"
+                echo "major=$MAJOR"           >> "$GITHUB_OUTPUT"
+                echo "CLEAN_VERSION=$CLEAN"   >> "$GITHUB_ENV"
+
+            - name: Fetch upstream checksum file
+              id: sum
+              run: |
+                wget -qO- "https://www.betterbird.eu/downloads/sha256-${{ steps.url.outputs.major }}.txt" > sha256-upstream.txt
+                EXPECTED="$(grep -F " *${{ steps.url.outputs.filename }}" sha256-upstream.txt | awk '{print$1}')"
+                [ -n "$EXPECTED" ] || { echo "::error::No checksum published for ${{ steps.url.outputs.filename }}"; exit 1; }
+                echo "expected=$EXPECTED" >> "$GITHUB_OUTPUT"
+
+            - name: Check whether a rebuild is needed
+              id: gate
+              env:
+                FORCE_REBUILD: ${{ inputs.force_rebuild }}
+                EXPECTED_SHA256: ${{ steps.sum.outputs.expected }}
+              run: |
+                if [ "$FORCE_REBUILD" = "true" ] || [ ! -f state/last-sha256.txt ] || [ "$(cat state/last-sha256.txt)" != "$EXPECTED_SHA256" ]; then
+                  echo "did_build=true" >> "$GITHUB_OUTPUT"
+                else
+                  echo "did_build=false" >> "$GITHUB_OUTPUT"
+                fi
+
+            - name: Download + integrity verify
+              if: steps.gate.outputs.did_build == 'true'
+              run: |
+                wget -q "${{ steps.url.outputs.url }}"
+                echo "${{ steps.sum.outputs.expected }} *${{ steps.url.outputs.filename }}" | sha256sum -c -
+
+            - name: Build AppImage
+              if: steps.gate.outputs.did_build == 'true'
+              run: |
+                bash betterbird-builder.sh
+                desktop-file-validate betterbird.AppDir/betterbird.desktop
+                [ "$(identify -format '%wx%h' betterbird.AppDir/.DirIcon)" = "256x256" ] || { echo "::error::.DirIcon is not 256x256"; exit 1; }
+                ls -lh dist/
+
+            - name: Publish versioned release (D1, D2)
+              if: steps.gate.outputs.did_build == 'true'
+              uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+              with:
+                tag_name: ${{ env.CLEAN_VERSION }}
+                name: "Betterbird ${{ env.CLEAN_VERSION }}"
+                files: |
+                    dist/*.AppImage
+                    dist/*.zsync
+
+            - name: Commit new state (D1b memory)
+              if: steps.gate.outputs.did_build == 'true'
+              run: |
+                mkdir -p state
+                echo "${{ steps.sum.outputs.expected }}" > state/last-sha256.txt
+                git config user.name "github-actions[bot]"
+                git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                git add state/last-sha256.txt
+                git diff --cached --quiet || git commit -m "state: upstream sha256 ${{ steps.sum.outputs.expected }}"
+                git push

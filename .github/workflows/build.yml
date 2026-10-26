@@ -31,7 +31,7 @@ jobs:
             - name: Resolve current upstream download URL
               id: url
               run: |
-                URL="$(wget -qO- 'https://www.betterbird.eu/downloads/getloc.php?os=linux&lang=en-US&version=release')"
+                URL="$(curl -fsSL 'https://www.betterbird.eu/downloads/getloc.php?os=linux&lang=en-US&version=release')"
                 FILENAME="$(basename "$URL")"
                 SERIES="${FILENAME#betterbird-}"
                 MAJOR="${SERIES%%.*}"
@@ -46,7 +46,7 @@ jobs:
             - name: Fetch upstream checksum file
               id: sum
               run: |
-                wget -qO- "https://www.betterbird.eu/downloads/sha256-${{ steps.url.outputs.major }}.txt" > sha256-upstream.txt
+                curl -fsSL "https://www.betterbird.eu/downloads/sha256-${{ steps.url.outputs.major }}.txt" -o sha256-upstream.txt
                 EXPECTED="$(grep -F " *${{ steps.url.outputs.filename }}" sha256-upstream.txt | awk '{print$1}')"
                 [ -n "$EXPECTED" ] || { echo "::error::No checksum published for ${{ steps.url.outputs.filename }}"; exit 1; }
                 echo "expected=$EXPECTED" >> "$GITHUB_OUTPUT"
@@ -66,7 +66,7 @@ jobs:
             - name: Download + integrity verify
               if: steps.gate.outputs.did_build == 'true'
               run: |
-                wget -q "${{ steps.url.outputs.url }}"
+                curl -fL -O "${{ steps.url.outputs.url }}"
                 echo "${{ steps.sum.outputs.expected }} *${{ steps.url.outputs.filename }}" | sha256sum -c -
 
             - name: Build AppImage

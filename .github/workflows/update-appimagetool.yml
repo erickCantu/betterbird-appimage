@@ -1,0 +1,131 @@
+name: Update pinned appimagetool
+
+on:
+  schedule:
+    - cron: "30 04 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Find latest stable appimagetool release
+        id: release
+        env:
+          API_URL: https://api.github.com/repos/AppImage/appimagetool/releases
+        run: |
+          set -euo pipefail
+          RELEASE="$(curl -fsSL "$API_URL" | python3 -c '
+          import json
+          import re
+          import sys
+
+          releases = json.load(sys.stdin)
+          release = next(
+              release for release in releases
+              if not release["draft"]
+              and not release["prerelease"]
+              and re.fullmatch(r"1\.[0-9]+\.[0-9]+", release["tag_name"])
+          )
+          asset = next(
+              asset for asset in release["assets"]
+              if asset["name"] == "appimagetool-x86_64.AppImage"
+          )
+          digest = asset.get("digest", "")
+          if not digest.startswith("sha256:"):
+              raise SystemExit("release asset has no SHA-256 digest")
+          print(release["tag_name"])
+          print(asset["browser_download_url"])
+          print(digest.split(":", 1)[1])
+          ')"
+
+          {
+            echo "tag=$(printf '%s\n' "$RELEASE" | sed -n '1p')"
+            echo "url=$(printf '%s\n' "$RELEASE" | sed -n '2p')"
+            echo "sha=$(printf '%s\n' "$RELEASE" | sed -n '3p')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the proposed release asset
+        env:
+          TOOL_URL: ${{ steps.release.outputs.url }}
+          TOOL_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TOOL_URL" =~ ^https://github\.com/AppImage/appimagetool/releases/download/1\.[0-9]+\.[0-9]+/appimagetool-x86_64\.AppImage$ ]]
+          [[ "$TOOL_SHA" =~ ^[[:xdigit:]]{64}$ ]]
+          curl -fsSL "$TOOL_URL" -o /tmp/appimagetool-x86_64.AppImage
+          printf '%s  %s\n' "$TOOL_SHA" /tmp/appimagetool-x86_64.AppImage | sha256sum -c -
+
+      - name: Update the pinned builder values
+        env:
+          TOOL_URL: ${{ steps.release.outputs.url }}
+          TOOL_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("betterbird-builder.sh")
+          text = path.read_text()
+          url = os.environ["TOOL_URL"]
+          sha = os.environ["TOOL_SHA"]
+          if not re.fullmatch(
+              r"https://github\.com/AppImage/appimagetool/releases/download/"
+              r"1\.\d+\.\d+/appimagetool-x86_64\.AppImage",
+              url,
+          ):
+              raise SystemExit("unexpected appimagetool URL")
+          if not re.fullmatch(r"[0-9a-f]{64}", sha):
+              raise SystemExit("unexpected appimagetool SHA-256")
+
+          updated, url_count = re.subn(
+              r'^TOOL_URL="[^"]+"$',
+              f'TOOL_URL="{url}"',
+              text,
+              flags=re.MULTILINE,
+          )
+          updated, sha_count = re.subn(
+              r'^TOOL_SHA="[0-9a-f]{64}"$',
+              f'TOOL_SHA="{sha}"',
+              updated,
+              flags=re.MULTILINE,
+          )
+          if url_count != 1 or sha_count != 1:
+              raise SystemExit(
+                  "betterbird-builder.sh must contain exactly one TOOL_URL and TOOL_SHA"
+              )
+          path.write_text(updated)
+          PY
+
+          bash -n betterbird-builder.sh
+          grep -F "TOOL_URL=\"$TOOL_URL\"" betterbird-builder.sh
+          grep -F "TOOL_SHA=\"$TOOL_SHA\"" betterbird-builder.sh
+
+      - name: Open update pull request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "build: update appimagetool to ${{ steps.release.outputs.tag }}"
+          title: "build: update appimagetool to ${{ steps.release.outputs.tag }}"
+          body: |
+            Automated appimagetool update.
+
+            - Release: `${{ steps.release.outputs.tag }}`
+            - Asset SHA-256: `${{ steps.release.outputs.sha }}`
+            - The asset was downloaded and verified before this pull request was created.
+          branch: automation/update-appimagetool
+          delete-branch: true
+          labels: |
+            dependencies
+            appimagetool

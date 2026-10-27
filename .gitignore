@@ -1,0 +1,16 @@
+# ── Build OUTPUT (regenerated each run; published as release assets, never committed) ──
+*.AppImage          # the built Betterbird AppImage (~100 MB) — must not live in git
+*.zsync             # zsync delta files appimagetool emits for incremental updates
+dist/               # CI staging dir where finished AppImages are moved before upload
+
+# ── Build STAGING (rebuilt from scratch every run) ──
+betterbird.AppDir/  # the unpacked app dir appimagetool consumes; large + transient
+
+# ── Downloaded INPUTS (fetched at build time; never committed) ──
+*.tar.*             # the ~81 MB Betterbird source tarball (xz/gz — .* = any archive ext)
+appimagetool*       # the packager tool we download during the build
+sha256-*.txt        # Betterbird's published checksum files, fetched for verification
+
+# ── Editor / OS cruft (general hygiene) ──
+*.swp
+.DS_Store

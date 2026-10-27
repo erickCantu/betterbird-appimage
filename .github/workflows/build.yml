@@ -73,9 +73,20 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL "https://www.betterbird.eu/downloads/sha256-${MAJOR}.txt" -o sha256-upstream.txt
-          EXPECTED="$(grep -F " *${FILENAME}" sha256-upstream.txt | awk '{print $1}')"
+          EXPECTED="$(awk -v filename="$FILENAME" '
+            function normalized(value) {
+              sub(/^\*/, "", value)
+              gsub(/esr/, "", value)
+              return value
+            }
+            $1 ~ /^[[:xdigit:]]{64}$/ && normalized($2) == normalized(filename) {
+              print $1
+              exit
+            }
+          ' sha256-upstream.txt)"
           if ! printf '%s' "$EXPECTED" | grep -Eq '^[[:xdigit:]]{64}$'; then
             echo "::error::No valid checksum published for $FILENAME"
+            grep -E 'betterbird-[0-9].*\.en-US\.linux-x86_64\.tar\.xz' sha256-upstream.txt || true
             exit 1
           fi
           echo "expected=$EXPECTED" >> "$GITHUB_OUTPUT"

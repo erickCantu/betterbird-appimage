@@ -59,6 +59,7 @@ jobs:
         id: gate
         env:
           CLEAN: ${{ steps.url.outputs.clean }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           code="$(curl -sS -o /dev/null -w '%{http_code}' \

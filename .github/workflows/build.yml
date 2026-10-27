@@ -4,12 +4,6 @@ on:
   schedule:
     - cron: "0 21 * * 6"
   workflow_dispatch:
-    inputs:
-      force_rebuild:
-        description: "Force rebuild even if upstream is unchanged"
-        required: false
-        type: boolean
-        default: false
 
 concurrency:
   group: build-${{ github.ref }}
@@ -23,15 +17,11 @@ jobs:
     outputs:
       did_build: ${{ steps.gate.outputs.did_build }}
       clean: ${{ steps.url.outputs.clean }}
-      expected_sha256: ${{ steps.sum.outputs.expected }}
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-
-      - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y imagemagick desktop-file-utils
 
       - name: Resolve current upstream download URL
         id: url
@@ -65,7 +55,29 @@ jobs:
             echo "clean=$CLEAN"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Check wheter this version was already published
+        id: gate
+        env:
+          CLEAN: ${{ steps.url.outputs.clean }}
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${CLEAN}")"
+          if [ "$code" = "200" ]; then
+            echo "Release ${CLEAN} already published — skipping build."
+            echo "did_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release for ${CLEAN} (HTTP ${code}) — building and publishing."
+            echo "did_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install build tools
+        if: steps.gate.outputs.did_build == 'true'
+        run: sudo apt-get update && sudo apt-get install -y imagemagick desktop-file-utils
+
       - name: Fetch upstream checksum file
+        if: steps.gate.outputs.did_build == 'true'
         id: sum
         env:
           MAJOR: ${{ steps.url.outputs.major }}
@@ -79,18 +91,6 @@ jobs:
             exit 1
           fi
           echo "expected=$EXPECTED" >> "$GITHUB_OUTPUT"
-
-      - name: Check whether a rebuild is needed
-        id: gate
-        env:
-          FORCE_REBUILD: ${{ inputs.force_rebuild }}
-          EXPECTED_SHA256: ${{ steps.sum.outputs.expected }}
-        run: |
-          if [ "$FORCE_REBUILD" = "true" ] || [ ! -f state/last-sha256.txt ] || [ "$(cat state/last-sha256.txt)" != "$EXPECTED_SHA256" ]; then
-            echo "did_build=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "did_build=false" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Download and verify upstream archive
         if: steps.gate.outputs.did_build == 'true'
@@ -120,7 +120,7 @@ jobs:
 
       - name: Upload build artifacts
         if: steps.gate.outputs.did_build == 'true'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: betterbird-${{ steps.url.outputs.clean }}
           path: |
@@ -153,4 +153,3 @@ jobs:
           files: |
             dist/*.AppImage
             dist/*.zsync
-

@@ -73,13 +73,14 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsSL "https://www.betterbird.eu/downloads/sha256-${MAJOR}.txt" -o sha256-upstream.txt
-          EXPECTED="$(awk -v filename="$FILENAME" '
-            function normalized(value) {
-              sub(/^\*/, "", value)
-              gsub(/esr/, "", value)
-              return value
+          ESR_FILENAME="${FILENAME/-bb/esr-bb}"
+          EXPECTED="$(awk -v filename="$FILENAME" -v esr_filename="$ESR_FILENAME" '
+            {
+              name = $2
+              sub(/^\*/, "", name)
             }
-            $1 ~ /^[[:xdigit:]]{64}$/ && normalized($2) == normalized(filename) {
+            length($1) == 64 && $1 ~ /^[[:xdigit:]]+$/ &&
+              (name == filename || name == esr_filename) {
               print $1
               exit
             }

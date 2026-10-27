@@ -82,9 +82,23 @@ chmod +x "$APP.AppDir/AppRun"
 
 # -- 4. Package creation
 mkdir -p dist
+OUTPUT="dist/Betterbird-${CLEAN}-x86_64.AppImage"
 ARCH=x86_64 ./appimagetool-x86_64.AppImage \
   -u "gh-releases-zsync|${REPO_OWNER}|${REPO_NAME}|latest|Betterbird-*-x86_64.AppImage.zsync" \
   "$APP.AppDir" \
-  "dist/Betterbird-${CLEAN}-x86_64.AppImage"
+  "$OUTPUT"
 
-echo "Build: dist/Betterbird-${CLEAN}-x86_64.AppImage"
+EXPECTED_ZSYNC="${OUTPUT}.zsync"
+if [ ! -f "$EXPECTED_ZSYNC" ]; then
+  for candidate in \
+    "$(basename "$OUTPUT").zsync" \
+    "$(basename "${OUTPUT%.AppImage}").zsync"
+  do
+    if [ -f "$candidate" ]; then
+      mv -f "$candidate" "$EXPECTED_ZSYNC"
+      break
+    fi
+  done
+fi
+
+echo "Build: $OUTPUT"

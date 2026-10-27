@@ -55,7 +55,7 @@ jobs:
             echo "clean=$CLEAN"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Check wheter this version was already published
+      - name: Check whether this version was already published
         id: gate
         env:
           CLEAN: ${{ steps.url.outputs.clean }}

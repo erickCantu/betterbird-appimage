@@ -47,7 +47,6 @@ convert "$ICON_SRC/default128.png" -resize 256x256 \
 cat > "$APP.AppDir/betterbird.desktop" << 'EOF'
 [Desktop Entry]
 Version=1.0
-Encoding=UTF-8
 Type=Application
 Name=Betterbird
 GenericName=Mail Client
@@ -59,6 +58,7 @@ Categories=Network;Email;
 MimeType=message/rfc822;x-scheme-handler/mailto;
 StartupWMClass=eu.betterbird.Betterbird
 StartupNotify=true
+Actions=ComposeMessage;OpenAddressBook;
 
 [Desktop Action ComposeMessage]
 Name=Compose Message

@@ -35,6 +35,7 @@ cp -a "./$APP"/. "$APP.AppDir/usr/"
 touch "$APP.AppDir/is_packaged_app"
 convert "$APP.AppDir/usr/chrome/icons/default/default128.png" \
         -resize 256x256 "$APP.AppDir/.DirIcon"
+cp "$APP.AppDir/.DirIcon" "$APP.AppDir/betterbird.png"
 
 ICON_SRC="$APP.AppDir/usr/chrome/icons/default"
 for png in "$ICON_SRC"/default*.png; do

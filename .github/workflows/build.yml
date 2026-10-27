@@ -145,6 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -166,22 +167,20 @@ jobs:
             dist/*.AppImage
             dist/*.zsync
 
-      - name: Commit new state
+      - name: Update state file
         env:
           EXPECTED_SHA256: ${{ needs.build.outputs.expected_sha256 }}
         run: |
           set -euo pipefail
           mkdir -p state
           printf '%s\n' "$EXPECTED_SHA256" > state/last-sha256.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state/last-sha256.txt
-          git diff --cached --quiet || git commit -m "state: upstream sha256 $EXPECTED_SHA256"
-          if ! PUSH_OUTPUT="$(git push 2>&1)"; then
-            printf '%s\n' "$PUSH_OUTPUT"
-            if printf '%s' "$PUSH_OUTPUT" | grep -q "Protected branch update failed"; then
-              echo "::warning::Could not push state update because branch protection requires pull requests."
-            else
-              exit 1
-            fi
-          fi
+
+      - name: Create pull request for state update
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "state: upstream sha256 ${{ needs.build.outputs.expected_sha256 }}"
+          title: "state: update upstream sha256 for ${{ needs.build.outputs.clean }}"
+          body: |
+            Automated state update from the publish workflow.
+          branch: "ci/state-sha-${{ needs.build.outputs.clean }}"
+          delete-branch: true
